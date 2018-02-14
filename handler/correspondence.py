@@ -48,7 +48,7 @@ class Batch():
                 raise ConfigException(
                     'Missing required key {0} in batch config'.format(key)
                     )
-        self.letters         = {}
+        self.letters       = {}
         self.extra_files   = []
         self.local_path    = os.path.normpath(config.get('ROOT'))
         self.index_file    = os.path.join(self.local_path,
@@ -80,9 +80,20 @@ class Batch():
                 # Create a graph of all triples with that subject
                 itemgraph = Graph()
                 itemgraph += g.triples((subj_uri, None, None))
+                # Get the letter's extent
+                if dcterms.extent in itemgraph.predicates():
+                    extent = int(itemgraph.value(subject_uri, dcterms.extent))
+                else:
+                    extent = None
                 # Serialize the graph to the path location
                 self.logger.info('Serializing graph {0}'.format(outfile))
                 itemgraph.serialize(destination=outfile, format="turtle")
+                
+                self.letters[item_id] = {'files': [],
+                                         'parts': {},
+                                         'metadata': outfile,
+                                         'extent': extent
+                                         }
 
         # Generate the batch index by reading from file or walking directories
         if os.path.isfile(self.index_file):
@@ -102,6 +113,7 @@ class Batch():
                     if match:
                         groups = match.groupdict()
                         item_id = '-'.join([groups['proj'], groups['ser_no']])
+                        # check for item-level graph in 
                         # create resource entry if it doesn't exist
                         if not item_id in self.letters:
                             self.letters[item_id] = {'files': [],
