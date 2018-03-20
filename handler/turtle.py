@@ -40,8 +40,7 @@ class Batch():
                          'LOG_CONFIG',
                          'METADATA_FILE',
                          'METADATA_PATH',
-                         'DATA_PATH',
-                         'INCLUDE_PATTERN'
+                         'DATA_PATH'
                          ] 
         for key in required_keys:
             if not config.get(key):
@@ -53,8 +52,8 @@ class Batch():
         self.local_path    = os.path.normpath(config.get('ROOT'))
         self.index_file    = os.path.join(self.local_path,
                                           config.get('BATCH_INDEX'))
-        self.pattern       = re.compile(config['INCLUDE_PATTERN'], re.VERBOSE)
-        self.data_path     = os.path.join(self.local_path, config['DATA_PATH'])
+        self.data_path     = os.path.join(self.local_path, 
+                                          config['DATA_PATH'])
         self.metadata_path = os.path.join(self.local_path, 
                                           config['METADATA_PATH'])
         self.metadata_file = os.path.join(self.local_path,
@@ -91,28 +90,35 @@ class Batch():
             with open(self.index_file, 'r') as infile:
                 self.items = yaml.load(infile)
         else:
-            # Walk directory and construct items by file name
-            for (dir, subdirs, files) in os.walk(self.data_path):
-                for f in files:
-                    fullpath = os.path.join(dir, f)
-                    relpath  = os.path.relpath(fullpath, self.local_path)
-                    basename = os.path.basename(relpath)
-                    match    = re.match(self.pattern, basename)
-
-                    if match:
-                        groups = match.groupdict()
-                        item_id = '-'.join([groups['proj'], groups['ser_no']])
-                        # create resource entry if it doesn't exist
-                        if not item_id in self.items:
-                            self.items[item_id] = {'files': [],
-                                                   'parts': {},
-                                                   'metadata': ''
-                                                   }
+            # Construct items from item-level metadata graphs
+            for f in os.listdir(self.metadata_path):
+                fullpath     = os.path.join(self.metadata_path, f)
+                relpath      = os.path.relpath(fullpath, self.local_path)
+                basename     = os.path.basename(relpath)
+                item_id, ext = os.path.splitext(basename)
+                if item_id.startswith('.'):
+                    # skip files starting with dot
+                    self.extra_files.append(relpath)
+                    continue
+                else:
+                    # create resource entry if it doesn't exist
+                    if not item_id in self.items:
+                        self.items[item_id] = {'files': [],
+                                               'parts': {},
+                                               'metadata': ''
+                                               }
                         current_item = self.items[item_id]
-                        # add file directly to resource if no sequence number
-                        if groups['seq_no'] is None:
-                            current_item['files'].append(relpath)
-                        else:
+                        item_graph = Graph().parse(fullpath, format="turtle")
+                        for p in item_graph.objects(predicate=dcterms.hasPart):
+                            print(p)
+                        
+                        # read graph
+                        # get extent
+                        # get files
+                        # create parts for number in extent range
+                        # add files to parts based on naming pattern
+                        
+                        '''
                             parts = current_item['parts']
                             part_id = str(int(groups['seq_no']))
                             # create part if it doesn't exist
@@ -120,9 +126,7 @@ class Batch():
                                 parts[part_id] = {'files': [], 'parts': {}}
                             # append file path to existing part
                             parts[part_id]['files'].append(relpath)
-                    else:
-                        # add files not fitting the pattern to extra files list
-                        self.extra_files.append(relpath)
+                        '''
 
             # Add existing metadata files to the batch index
             for id in self.items:
@@ -165,7 +169,7 @@ class Batch():
 
 class Item(pcdm.Item):
 
-    '''Class representing a letter'''
+    '''Class representing a paged repository item resource'''
 
     def __init__(self, id, item_map, root):
         super().__init__()
@@ -185,7 +189,7 @@ class Item(pcdm.Item):
             self.add_component(Page(id, parts['files'], self))
 
     def graph(self):
-        graph = super(Letter, self).graph()
+        graph = super(Item, self).graph()
         if os.path.isfile(self.path):
             metadata = Graph().parse(self.path, format='turtle')
             for (s,p,o) in metadata:
@@ -203,7 +207,7 @@ class Item(pcdm.Item):
 
 class Page(pcdm.Component):
 
-    '''Class representing a page of a letter'''
+    '''Class representing one page of an item-level resource'''
 
     def __init__(self, id, files, item):
         super().__init__()
@@ -218,6 +222,7 @@ class Page(pcdm.Component):
         graph = super(Page, self).graph()
         graph.add((self.uri, dcterms.title, Literal(self.title)))
         graph.add((self.uri, rdf.type, fabio.Page))
+        graph.add((self.uri, fabio.hasSequenceIdentifier, Literal(self.id)))
         return graph
 
 
@@ -227,7 +232,7 @@ class Page(pcdm.Component):
 
 class File(pcdm.File):
 
-    '''Class representing file associated with a letter or page resource'''
+    '''Class representing file associated with an item or page resource'''
 
     def graph(self):
         graph = super(File, self).graph()
