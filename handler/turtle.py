@@ -107,10 +107,16 @@ class Batch():
                                                'parts': {},
                                                'metadata': ''
                                                }
-                        current_item = self.items[item_id]
-                        item_graph = Graph().parse(fullpath, format="turtle")
-                        for p in item_graph.objects(predicate=dcterms.hasPart):
-                            print(p)
+                    current_item = self.items[item_id]
+                    item_graph = Graph().parse(fullpath, format="turtle")
+                    subj = next(item_graph.subjects())
+                    print(subj)
+                    print('='*50)
+                    print('ITEM:', item_id)
+                    extent = item_graph.value(subj, dcterms.extent)
+                    print('extent:', extent)
+                    for part in item_graph.objects(predicate=dcterms.hasPart):
+                        print(part)
                         
                         # read graph
                         # get extent
