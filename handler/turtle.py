@@ -67,6 +67,14 @@ class Batch():
         if not os.path.isfile(self.metadata_file):
             raise ConfigException('Specified metadata file could not be found')
 
+        # Generate index of all files in the data path
+        self.logger.info("Walking Data Path directory to create file index")
+        self.all_files = {}
+        for root, dirs, files in os.walk(self.data_path):
+            for f in files:
+                self.all_files[f] = os.path.join(root,f)
+        self.logger.info("Found {0} files".format(len(self.all_files)))
+
         # Generate item-level metadata graphs and store as files
         with open(self.metadata_file, 'r') as f:    
             g = Graph().parse(f, format="turtle")
@@ -110,29 +118,28 @@ class Batch():
                     current_item = self.items[item_id]
                     item_graph = Graph().parse(fullpath, format="turtle")
                     subj = next(item_graph.subjects())
-                    print(subj)
-                    print('='*50)
-                    print('ITEM:', item_id)
-                    extent = item_graph.value(subj, dcterms.extent)
-                    print('extent:', extent)
-                    for part in item_graph.objects(predicate=dcterms.hasPart):
-                        print(part)
-                        
-                        # read graph
-                        # get extent
-                        # get files
-                        # create parts for number in extent range
-                        # add files to parts based on naming pattern
-                        
-                        '''
-                            parts = current_item['parts']
-                            part_id = str(int(groups['seq_no']))
-                            # create part if it doesn't exist
-                            if part_id not in parts:
-                                parts[part_id] = {'files': [], 'parts': {}}
-                            # append file path to existing part
-                            parts[part_id]['files'].append(relpath)
-                        '''
+                    extent_predicate = item_graph.value(subj, dcterms.extent).split(' ')
+                    extent = int(extent_predicate[0])
+                    files = [
+                        str(f) for f in item_graph.objects(predicate=dcterms.hasPart)
+                        ]
+                    parts = {}
+                    for filename in files:
+                        normalized = filename.replace('_', '-')
+                        basename, ext = normalized.split('.')
+                        base_parts = basename.split('-')
+                        if len(base_parts) == 2:
+                            self.items[item_id]['files'].append(self.all_files[filename])
+                        elif len(base_parts) == 3:
+                            page_no = int(base_parts[2])
+                            if page_no not in parts:
+                                parts[page_no] = [self.all_files[filename]]
+                            else:
+                                parts[page_no].append(self.all_files[filename])
+                        else:
+                            print("ERROR!")
+                    for n, p in enumerate(sorted(parts.keys())):
+                        self.items[item_id]['parts'][n+1] = parts[p]
 
             # Add existing metadata files to the batch index
             for id in self.items:
@@ -140,6 +147,13 @@ class Batch():
                 if os.path.isfile(expected_meta):
                     rel_meta = os.path.relpath(expected_meta, self.local_path)
                     self.items[id]['metadata'] = rel_meta
+            
+            for id in self.items:
+                print('=' * 65)
+                print(id.upper())
+                print('FILES:', self.items[id]['files'])
+                print('PARTS:', self.items[id]['parts'])
+                print('METADATA:', self.items[id]['metadata'])
 
             # Serialize the index to a YAML file
             self.logger.info("Serializing index to {0}".format(
