@@ -30,6 +30,7 @@ class Batch():
         self.logger = logging.getLogger(
             __name__ + '.' + self.__class__.__name__
             )
+
         # Check for required configuration items and set up paths
         required_keys = ['HANDLER',
                          'COLLECTION',
@@ -47,8 +48,8 @@ class Batch():
                 raise ConfigException(
                     'Missing required key {0} in batch config'.format(key)
                     )
-        self.items         = {}
-        self.extra_files   = []
+
+        # Set configuration Properties
         self.local_path    = os.path.normpath(config.get('ROOT'))
         self.index_file    = os.path.join(self.local_path,
                                           config.get('BATCH_INDEX'))
@@ -61,6 +62,11 @@ class Batch():
         self.collection    = pcdm.Collection.from_repository(repo,
                                                      config.get('COLLECTION'))
 
+        # Create data structures to accumulate process results
+        self.items       = {}
+        self.incomplete  = []
+        self.extra_files = []
+
         # Check for required metadata file and path
         if not os.path.isdir(self.metadata_path):
             os.mkdir(self.metadata_path)
@@ -68,7 +74,7 @@ class Batch():
             raise ConfigException('Specified metadata file could not be found')
 
         # Generate index of all files in the data path
-        self.logger.info("Walking Data Path directory to create file index")
+        self.logger.info('Walking the "data path" tree to create a file index')
         self.all_files = {}
         for root, dirs, files in os.walk(self.data_path):
             for f in files:
@@ -76,7 +82,8 @@ class Batch():
         self.logger.info("Found {0} files".format(len(self.all_files)))
 
         # Generate item-level metadata graphs and store as files
-        with open(self.metadata_file, 'r') as f:    
+        with open(self.metadata_file, 'r') as f:
+            self.logger.info('Parsing the master metadata graph')
             g = Graph().parse(f, format="turtle")
             # For each of the unique subjects in the graph
             for subj_uri in set([i for i in g.subjects()]):
@@ -91,63 +98,25 @@ class Batch():
                 self.logger.info('Serializing graph {0}'.format(outfile))
                 itemgraph.serialize(destination=outfile, format="turtle")
 
-        # Generate the batch index by reading from file or walking directories
+        # If available, read batch index from file
         if os.path.isfile(self.index_file):
             self.logger.info("Reading batch index from {0}".format(
                                                         self.index_file))
             with open(self.index_file, 'r') as infile:
                 self.items = yaml.load(infile)
+                
+        # Otherwise, construct the index by reading graph files
         else:
-            # Construct items from item-level metadata graphs
             for f in os.listdir(self.metadata_path):
-                fullpath     = os.path.join(self.metadata_path, f)
-                relpath      = os.path.relpath(fullpath, self.local_path)
-                basename     = os.path.basename(relpath)
-                item_id, ext = os.path.splitext(basename)
-                if item_id.startswith('.'):
-                    # skip files starting with dot
-                    self.extra_files.append(relpath)
+                fullpath = os.path.join(self.metadata_path, f)
+                # skip files starting with dot
+                if f.startswith('.'):
+                    self.extra_files.append(fullpath)
                     continue
                 else:
-                    # create resource entry if it doesn't exist
-                    if not item_id in self.items:
-                        self.items[item_id] = {'files': [],
-                                               'parts': {},
-                                               'metadata': ''
-                                               }
-                    current_item = self.items[item_id]
-                    item_graph = Graph().parse(fullpath, format="turtle")
-                    subj = next(item_graph.subjects())
-                    extent_predicate = item_graph.value(subj, dcterms.extent).split(' ')
-                    extent = int(extent_predicate[0])
-                    files = [
-                        str(f) for f in item_graph.objects(predicate=dcterms.hasPart)
-                        ]
-                    parts = {}
-                    for filename in files:
-                        normalized = filename.replace('_', '-')
-                        basename, ext = normalized.split('.')
-                        base_parts = basename.split('-')
-                        if len(base_parts) == 2:
-                            self.items[item_id]['files'].append(self.all_files[filename])
-                        elif len(base_parts) == 3:
-                            page_no = int(base_parts[2])
-                            if page_no not in parts:
-                                parts[page_no] = [self.all_files[filename]]
-                            else:
-                                parts[page_no].append(self.all_files[filename])
-                        else:
-                            print("ERROR!")
-                    for n, p in enumerate(sorted(parts.keys())):
-                        self.items[item_id]['parts'][n+1] = parts[p]
+                    id = f.rstrip('.ttl')
+                    self.items[id] = Item_dictionary(fullpath)
 
-            # Add existing metadata files to the batch index
-            for id in self.items:
-                expected_meta = os.path.join(self.metadata_path, id) + '.ttl'
-                if os.path.isfile(expected_meta):
-                    rel_meta = os.path.relpath(expected_meta, self.local_path)
-                    self.items[id]['metadata'] = rel_meta
-            
             for id in self.items:
                 print('=' * 65)
                 print(id.upper())
@@ -181,6 +150,57 @@ class Batch():
         else:
             self.logger.info('Processing complete!')
             raise StopIteration()
+
+
+#============================================================================
+# BATCH INDEX ENTRY CLASS
+#============================================================================
+
+class Item_dictionary():
+
+    '''Class representing a single item in the batch index'''
+
+    def __init__(self, metadata_path):
+        self.data = {'files': [], 'parts': {}, 'metadata': ''}
+        relpath      = os.path.relpath(fullpath, self.local_path)
+        basename     = os.path.basename(relpath)
+        item_id, ext = os.path.splitext(basename)
+
+        '''
+        # create resource entry if it doesn't exist
+        current_item = items[item_id]
+        item_graph = Graph().parse(fullpath, format="turtle")
+        subj = next(item_graph.subjects())
+        extent_predicate = item_graph.value(subj, dcterms.extent).split(' ')
+        extent = int(extent_predicate[0])
+        files = [
+            str(f) for f in item_graph.objects(predicate=dcterms.hasPart)
+            ]
+        parts = {}
+        for filename in files:
+            normalized = filename.replace('_', '-')
+            basename, ext = normalized.split('.')
+            base_parts = basename.split('-')
+            if len(base_parts) == 2:
+                self.items[item_id]['files'].append(all_files[filename])
+            elif len(base_parts) == 3:
+                page_no = int(base_parts[2])
+                if page_no not in parts:
+                    parts[page_no] = [all_files[filename]]
+                else:
+                    parts[page_no].append(all_files[filename])
+            else:
+                print("ERROR!")
+        for n, p in enumerate(sorted(parts.keys())):
+            self.items[item_id]['parts'][n+1] = parts[p]
+
+    # Add existing metadata files to the batch index
+    for id in self.items:
+        expected_meta = os.path.join(self.metadata_path, id) + '.ttl'
+        if os.path.isfile(expected_meta):
+            rel_meta = os.path.relpath(expected_meta, self.local_path)
+            self.items[id]['metadata'] = rel_meta
+            '''
 
 
 #============================================================================
