@@ -100,11 +100,10 @@ class Batch():
 
         # If available, read batch index from file
         if os.path.isfile(self.index_file):
-            self.logger.info("Reading batch index from {0}".format(
-                                                        self.index_file))
+            self.logger.info("Reading batch index from {0}".format(self.index_file))
             with open(self.index_file, 'r') as infile:
                 self.items = yaml.load(infile)
-                
+
         # Otherwise, construct the index by reading graph files
         else:
             for f in os.listdir(self.metadata_path):
@@ -115,9 +114,12 @@ class Batch():
                     continue
                 else:
                     try:
-                        self.create_item(fullpath)
+                        id = os.path.basename(f).rstrip('.ttl')
+                        print(id)
+                        self.items[id] = self.create_item(fullpath)
                     except:
                         self.incomplete.append(fullpath)
+                        print('incomplete')
 
             for id in self.items:
                 print('=' * 65)
@@ -139,45 +141,43 @@ class Batch():
         self.logger.info("Batch contains {0} items.".format(self.length))
 
     def create_item(self, item_metadata):
-        data = {'files': [], 'parts': {}, 'metadata': ''}
-        relpath      = os.path.relpath(fullpath, self.local_path)
-        basename     = os.path.basename(relpath)
-        item_id, ext = os.path.splitext(basename)
-        '''
-        # create resource entry if it doesn't exist
-        current_item = items[item_id]
-        item_graph = Graph().parse(fullpath, format="turtle")
-        subj = next(item_graph.subjects())
-        extent_predicate = item_graph.value(subj, dcterms.extent).split(' ')
-        extent = int(extent_predicate[0])
-        files = [
-            str(f) for f in item_graph.objects(predicate=dcterms.hasPart)
-            ]
-        parts = {}
-        for filename in files:
+        data = {'metadata':  os.path.relpath(item_metadata, self.local_path),
+                'parts': {},
+                'files': []
+                }
+        print(data)
+        item_graph = Graph().parse(item_metadata, format="turtle")
+        print(item_graph)
+        subject    = next(item_graph.subjects())
+        print(subject)
+        extent     = int(item_graph.value(subject, dcterms.extent).split(' ')[0])
+        print(extent)
+        parts      = {}
+
+        # Parse each filename in hasPart and allocate to correct location in item entry
+        for filename in [str(f) for f in item_graph.objects(predicate=dcterms.hasPart)]:
             normalized = filename.replace('_', '-')
-            basename, ext = normalized.split('.')
+            basename, ext = os.path.splitext(normalized)
             base_parts = basename.split('-')
+            # handle files with no sequence id
             if len(base_parts) == 2:
-                self.items[item_id]['files'].append(all_files[filename])
+                data['files'].append(self.all_files[filename])
+            # handle files with a sequence id
             elif len(base_parts) == 3:
                 page_no = int(base_parts[2])
                 if page_no not in parts:
-                    parts[page_no] = [all_files[filename]]
+                    parts[page_no] = [self.all_files[filename]]
                 else:
-                    parts[page_no].append(all_files[filename])
+                    parts[page_no].append(self.all_files[filename])
             else:
                 print("ERROR!")
-        for n, p in enumerate(sorted(parts.keys())):
-            self.items[item_id]['parts'][n+1] = parts[p]
 
-        # Add existing metadata files to the batch index
-        for id in self.items:
-            expected_meta = os.path.join(self.metadata_path, id) + '.ttl'
-            if os.path.isfile(expected_meta):
-                rel_meta = os.path.relpath(expected_meta, self.local_path)
-                self.items[id]['metadata'] = rel_meta
-            '''
+        # Add items in parts dict to index entry according to position in sequence
+        for n, p in enumerate(sorted(parts.keys())):
+            data['parts'][n+1] = parts[p]
+
+        print(data)
+        return data
 
     def __iter__(self):
         return self
