@@ -114,8 +114,10 @@ class Batch():
                     self.extra_files.append(fullpath)
                     continue
                 else:
-                    id = f.rstrip('.ttl')
-                    self.items[id] = Item_dictionary(fullpath)
+                    try:
+                        self.create_item(fullpath)
+                    except:
+                        self.incomplete.append(fullpath)
 
             for id in self.items:
                 print('=' * 65)
@@ -136,36 +138,11 @@ class Batch():
         self.count = 0
         self.logger.info("Batch contains {0} items.".format(self.length))
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.count < self.length:
-            id = self.to_load[self.count]
-            item_map = self.items[id]
-            item = Item(id, item_map, self.local_path)
-            item.add_collection(self.collection)
-            self.count += 1
-            return item
-        else:
-            self.logger.info('Processing complete!')
-            raise StopIteration()
-
-
-#============================================================================
-# BATCH INDEX ENTRY CLASS
-#============================================================================
-
-class Item_dictionary():
-
-    '''Class representing a single item in the batch index'''
-
-    def __init__(self, metadata_path):
-        self.data = {'files': [], 'parts': {}, 'metadata': ''}
+    def create_item(self, item_metadata):
+        data = {'files': [], 'parts': {}, 'metadata': ''}
         relpath      = os.path.relpath(fullpath, self.local_path)
         basename     = os.path.basename(relpath)
         item_id, ext = os.path.splitext(basename)
-
         '''
         # create resource entry if it doesn't exist
         current_item = items[item_id]
@@ -194,13 +171,28 @@ class Item_dictionary():
         for n, p in enumerate(sorted(parts.keys())):
             self.items[item_id]['parts'][n+1] = parts[p]
 
-    # Add existing metadata files to the batch index
-    for id in self.items:
-        expected_meta = os.path.join(self.metadata_path, id) + '.ttl'
-        if os.path.isfile(expected_meta):
-            rel_meta = os.path.relpath(expected_meta, self.local_path)
-            self.items[id]['metadata'] = rel_meta
+        # Add existing metadata files to the batch index
+        for id in self.items:
+            expected_meta = os.path.join(self.metadata_path, id) + '.ttl'
+            if os.path.isfile(expected_meta):
+                rel_meta = os.path.relpath(expected_meta, self.local_path)
+                self.items[id]['metadata'] = rel_meta
             '''
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.count < self.length:
+            id = self.to_load[self.count]
+            item_map = self.items[id]
+            item = Item(id, item_map, self.local_path)
+            item.add_collection(self.collection)
+            self.count += 1
+            return item
+        else:
+            self.logger.info('Processing complete!')
+            raise StopIteration()
 
 
 #============================================================================
