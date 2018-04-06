@@ -115,11 +115,9 @@ class Batch():
                 else:
                     try:
                         id = os.path.basename(f).rstrip('.ttl')
-                        print(id)
                         self.items[id] = self.create_item(fullpath)
                     except:
                         self.incomplete.append(fullpath)
-                        print('incomplete')
 
             for id in self.items:
                 print('=' * 65)
@@ -145,13 +143,9 @@ class Batch():
                 'parts': {},
                 'files': []
                 }
-        print(data)
         item_graph = Graph().parse(item_metadata, format="turtle")
-        print(item_graph)
         subject    = next(item_graph.subjects())
-        print(subject)
         extent     = int(item_graph.value(subject, dcterms.extent).split(' ')[0])
-        print(extent)
         parts      = {}
 
         # Parse each filename in hasPart and allocate to correct location in item entry
@@ -164,11 +158,11 @@ class Batch():
                 data['files'].append(self.all_files[filename])
             # handle files with a sequence id
             elif len(base_parts) == 3:
-                page_no = int(base_parts[2])
+                page_no = str(int(base_parts[2]))
                 if page_no not in parts:
-                    parts[page_no] = [self.all_files[filename]]
+                    parts[page_no] = {'files': [self.all_files[filename]], 'parts': {}}
                 else:
-                    parts[page_no].append(self.all_files[filename])
+                    parts[page_no]['files'].append(self.all_files[filename])
             else:
                 print("ERROR!")
 
@@ -176,7 +170,6 @@ class Batch():
         for n, p in enumerate(sorted(parts.keys())):
             data['parts'][n+1] = parts[p]
 
-        print(data)
         return data
 
     def __iter__(self):
@@ -217,8 +210,8 @@ class Item(pcdm.Item):
         self.title = next(self.graph().objects(predicate=dcterms.title))
         for path in self.filepaths:
             self.add_file(File.from_localpath(path))
-        for (id, parts) in self.parts:
-            self.add_component(Page(id, parts['files'], self))
+        for (id, data) in self.parts:
+            self.add_component(Page(id, data['files'], self))
 
     def graph(self):
         graph = super(Item, self).graph()
@@ -243,7 +236,7 @@ class Page(pcdm.Component):
 
     def __init__(self, id, files, item):
         super().__init__()
-        self.id = id
+        self.id = str(id)
         self.title = "{0}, Page {1}".format(item.title, self.id)
         self.ordered = True
         for f in files:
